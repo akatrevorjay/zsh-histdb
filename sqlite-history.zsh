@@ -4,24 +4,22 @@ typeset -g HISTDB_QUERY=""
 typeset -g HISTDB_FILE="${HOME}/.histdb/zsh-history.db"
 typeset -g HISTDB_SESSION=""
 typeset -g HISTDB_HOST=""
-typeset -g HISTDB_INSTALLED_IN="${(%):-%N}"
+# typeset -g HISTDB_INSTALLED_IN="${(%):-%N}"
+# typeset -g HISTDB_INSTALLED_IN=${0:A:h}
 typeset -g HISTDB_AWAITING_EXIT=0
 
-zsh-histdb-sql-escape () {
-    sed -e "s/'/''/g" <<< "$@"
-}
-
 zsh-histdb-query () {
-    sqlite3 "${HISTDB_FILE}" "$@"
-    [[ "$?" -ne 0 ]] && echo "error in $@"
+    sqlite3 ${HISTDB_FILE} "$@"
+    local rv=$?
+    [[ $rv -eq 0 ]] || echo "[$0] error in: $*" >&2
+    return $rv
 }
 
 zsh-histdb-init () {
-    if ! [[ -e "${HISTDB_FILE}" ]]; then
-        local hist_dir="$(dirname ${HISTDB_FILE})"
-        if ! [[ -d "$hist_dir" ]]; then
-            mkdir -p -- "$hist_dir"
-        fi
+    if ! [[ -e ${HISTDB_FILE} ]]; then
+        local hist_dir=${HISTDB_FILE:h}
+        mkdir -pv -- $hist_dir
+
         zsh-histdb-query <<-EOF
 create table commands (argv text, unique(argv) on conflict ignore);
 create table places   (host text, dir text, unique(host, dir) on conflict ignore);
@@ -35,15 +33,16 @@ EOF
     fi
 
     if [[ -z ${HISTDB_SESSION} ]]; then
-        HISTDB_HOST="'$(zsh-histdb-sql-escape ${HOST})'"
+        HISTDB_HOST=${(qqq)HOST}
+
         HISTDB_SESSION=$(zsh-histdb-query "select 1+max(session) from history inner join places on places.rowid=history.place_id where places.host = ${HISTDB_HOST}")
-        HISTDB_SESSION="${HISTDB_SESSION:-0}"
+        : ${HISTDB_SESSION:=0}
         readonly HISTDB_SESSION
     fi
 }
 
 declare -a _BORING_COMMANDS
-_BORING_COMMANDS=("^ls$" "^cd$" "^ " "^histdb" "^top$" "^htop$")
+_BORING_COMMANDS=($'^ls$' $'^cd$' $'^ ' $'^histdb' $'^top$' $'^htop$')
 
 histdb-update-outcome () {
     local retval=$?
@@ -58,83 +57,102 @@ where rowid = (select max(rowid) from history) and session = ${HISTDB_SESSION}"
 
 zshaddhistory () {
     local cmd="${1[0, -2]}"
+    [[ -n $cmd ]] || return 0
 
-    for boring in "${_BORING_COMMANDS[@]}"; do
-        if [[ "$cmd" =~ $boring ]]; then
+    local boring
+    for boring in ${(@)_BORING_COMMANDS}; do
+        if [[ $cmd =~ $boring ]]; then
             return 0
         fi
     done
 
-    local cmd="'$(zsh-histdb-sql-escape $cmd)'"
-    local pwd="'$(zsh-histdb-sql-escape ${PWD})'"
     local started=$(date +%s)
     zsh-histdb-init
 
-    if [[ "$cmd" != "''" ]]; then
-        zsh-histdb-query \
-"insert into commands (argv) values (${cmd});
-insert into places   (host, dir) values (${HISTDB_HOST}, ${pwd});
-insert into history
-  (session, command_id, place_id, start_time)
-select
-  ${HISTDB_SESSION},
-  commands.rowid,
-  places.rowid,
-  ${started}
-from
-  commands, places
-where
-  commands.argv = ${cmd} and
-  places.host = ${HISTDB_HOST} and
-  places.dir = ${pwd}
-;"
-        HISTDB_AWAITING_EXIT=1
-    fi
+    zsh-histdb-query \
+      "insert into commands (argv) values (${(qqq)cmd});
+      insert into places   (host, dir) values (${HISTDB_HOST}, ${(qqq)pwd});
+      insert into history
+        (session, command_id, place_id, start_time)
+      select
+        ${HISTDB_SESSION},
+        commands.rowid,
+        places.rowid,
+        ${started}
+      from
+        commands, places
+      where
+        commands.argv = ${(qqq)cmd} and
+        places.host = ${HISTDB_HOST} and
+        places.dir = ${(qqq)pwd}
+      ;"
+
+    HISTDB_AWAITING_EXIT=1
+
     return 0
 }
 
 histdb-top () {
     zsh-histdb-init
-    local sep=$'\x1f'
     local field
     local join
     local table
-    1=${1:-cmd}
-    case "$1" in
+
+    argv=(${1:-cmd} "${@:2}")
+
+    case $1 in
         dir)
             field=places.dir
             join='places.rowid = history.place_id'
             table=places
             ;;
-        cmd)
+
+        cmd|*)
             field=commands.argv
             join='commands.rowid = history.command_id'
             table=commands
-            ;;;
+            ;;
     esac
-    zsh-histdb-query -separator "$sep" \
-            -header \
-            "select count(*) as count, places.host, replace($field, '
-', '
-$sep$sep') as ${1:-cmd} from history left join commands on history.command_id=commands.rowid left join places on history.place_id=places.rowid group by places.host, $field order by count(*)" |
-        column -t -s "$sep"
+
+    zsh-histdb-query \
+      -column \
+      -header "select count(*) as count, places.host, $field as cmd
+              from history
+                left join commands
+                  on history.command_id=commands.rowid
+                left join places
+                  on history.place_id=places.rowid
+                group by
+                  places.host,
+                  $field
+                order by count(*)"
 }
 
 histdb-sync () {
     zsh-histdb-init
-    local hist_dir="$(dirname ${HISTDB_FILE})"
-    if [[ -d "$hist_dir" ]]; then
-        pushd "$hist_dir"
-        if [[ $(git rev-parse --is-inside-work-tree) != "true" ]] || [[ "$(git rev-parse --show-toplevel)" != "$(pwd)" ]]; then
+
+    local hist_dir=${HISTDB_FILE:h}
+    [[ -d $hist_dir ]] || return
+
+    (
+        cd -- $hist_dir || return 1
+
+        local g_is_inside_work_tree=$(git rev-parse --is-inside-work-tree)
+        local g_show_toplevel=$(git rev-parse --show-toplevel)
+
+        if [[ $g_is_inside_work_tree != 'true' ]] || [[ $g_show_toplevel != $PWD ]]; then
             git init
-            git config merge.histdb.driver "$(dirname ${HISTDB_INSTALLED_IN})/histdb-merge %O %A %B"
-            echo "$(basename ${HISTDB_FILE}) merge=histdb" | tee -a .gitattributes &>-
+
+            git config merge.histdb.driver "${(qqq)HISTDB_INSTALLED_IN}/histdb-merge %O %A %B"
+
+            printf '%s merge=histdb\n' ${(qqq)HISTDB_FILE:t} >> ./.gitattributes
             git add .gitattributes
-            git add "$(basename ${HISTDB_FILE})"
+
+            git add ${HISTDB_FILE:t}
         fi
+
         git commit -am "history" && git pull --no-edit && git push
-        popd
-    fi
+    )
 }
 
 histdb () {
@@ -151,13 +169,12 @@ histdb () {
                -at+::=atdirs \
                -forget \
                -detail \
-               -sep:- \
                -exact \
                d h -help \
                s+::=sessions \
                -from:- -until:- -limit:-
 
-    local usage="usage:$0 terms [--host] [--in] [--at] [-s n]+* [--from] [--until] [--limit] [--forget] [--sep x] [--detail]
+    local usage="usage:$0 terms [--host] [--in] [--at] [-s n]+* [--from] [--until] [--limit] [--forget] [--detail]
     --host    print the host column and show all hosts (otherwise current host)
     --host x  find entries from host x
     --in      find only entries run in the current dir or below
@@ -168,7 +185,6 @@ histdb () {
     --detail  show details
     --forget  forget everything which matches in the history
     --exact   don't match substrings
-    --sep x   print with separator x, and don't tabulate
     --from x  only show commands after date x (sqlite date parser)
     --until x only show commands before date x (sqlite date parser)
     --limit n only show n rows. defaults to $LINES or 25"
@@ -190,7 +206,7 @@ histdb () {
         local host=""
         for host ($hosts); do
             host="${${host#--host}#=}"
-            hostwhere="${hostwhere}${host:+${hostwhere:+ or }places.host='$(zsh-histdb-sql-escape ${host})'}"
+            hostwhere="${hostwhere}${host:+${hostwhere:+ or }places.host=${(qqq)host}}"
         done
         where="${where}${hostwhere:+ and (${hostwhere})}"
         cols="${cols}, places.host as host"
@@ -202,14 +218,19 @@ histdb () {
     if (( ${#indirs} + ${#atdirs} )); then
         local dirwhere=""
         local dir=""
+        local match=''
+
         for dir ($indirs); do
-            dir="${${${dir#--in}#=}:-$PWD}"
-            dirwhere="${dirwhere}${dirwhere:+ or }places.dir like '$(zsh-histdb-sql-escape $dir)%'"
+            dir=${${${dir#--in}#=}:-$PWD}
+            match="$dir%"
+            dirwhere="${dirwhere}${dirwhere:+ or }places.dir like ${(qqq)match}"
         done
+
         for dir ($atdirs); do
             dir="${${${dir#--at}#=}:-$PWD}"
-            dirwhere="${dirwhere}${dirwhere:+ or }places.dir = '$(zsh-histdb-sql-escape $dir)'"
+            dirwhere="${dirwhere}${dirwhere:+ or }places.dir = ${(qqq)dir}"
         done
+
         where="${where}${dirwhere:+ and (${dirwhere})}"
     fi
 
@@ -223,14 +244,10 @@ histdb () {
         where="${where}${sin:+ and session in ($sin)}"
     fi
 
-    local sep=$'\x1f'
     local debug=0
     local opt=""
     for opt ($opts); do
         case $opt in
-            --sep*)
-                sep=${opt#--sep}
-                ;;
             --from*)
                 local from=${opt#--from}
                 case $from in
@@ -286,19 +303,17 @@ histdb () {
 
     if [[ -n "$*" ]]; then
         if [[ $exact -eq 0 ]]; then
-            where="${where} and commands.argv glob '*$(zsh-histdb-sql-escape $@)*'"
+            local match="*${*}*"
+            where="${where} and commands.argv glob ${(qqq)match}"
         else
-            where="${where} and commands.argv = '$(zsh-histdb-sql-escape $@)'"
+            where="${where} and commands.argv = ${(qqq)*}"
         fi
     fi
 
     if [[ $forget -gt 0 ]]; then
         limit=""
     fi
-    local seps=$(echo "$cols" | tr -c -d ',' | tr ',' $sep)
-    cols="${cols}, replace(commands.argv, '
-', '
-$seps') as argv, max(start_time) as max_start"
+    cols+=", commands.argv as argv, max(start_time) as max_start"
 
     local mst="datetime(max_start, 'unixepoch')"
     local dst="datetime('now', 'start of day')"
@@ -343,11 +358,9 @@ order by max_start desc) order by max_start asc"
                 cat
             }
         fi
-        if [[ $sep == $'\x1f' ]]; then
-            zsh-histdb-query -header -separator $sep "$query" | iconv -f utf-8 -t utf-8 -c | column -t -s $sep | buffer
-        else
-            zsh-histdb-query -header -separator $sep "$query" | buffer
-        fi
+
+        zsh-histdb-query -header -column $query
+
         [[ -n $limit ]] && [[ $limit -lt $count ]] && echo "(showing $limit of $count results)"
     fi
 

@@ -43,18 +43,20 @@ zsh-histdb-isearch_query () {
     fi
 
     if [[ $HISTDB_ISEARCH_THIS_DIR == 1 ]]; then
-        local where_dir="and places.dir like '$(sql_escape $PWD)%'"
+        local match="$PWD%"
+        local where_dir="and places.dir like ${(qqq)match}'"
     else
         local where_dir=""
     fi
 
 
     if [[ $HISTDB_ISEARCH_THIS_HOST == 1 ]]; then
-        local where_host="and places.host = '$(sql_escape $HOST)'"
+        local where_host="and places.host = ${(qqq)HOST}"
     else
         local where_host=""
     fi
 
+    local match="*${BUFFER}*"
     local query="select
 commands.argv,
 places.dir,
@@ -64,13 +66,14 @@ from history left join commands
 on history.command_id = commands.rowid
 left join places
 on history.place_id = places.rowid
-where commands.argv glob '*$(sql_escape ${BUFFER})*'
+where commands.argv glob ${(qqq)match}
 ${where_host}
 ${where_dir}
 group by commands.argv, places.dir, places.host
 order by ${maxmin}(history.start_time) ${ascdesc}
 limit 1
 offset ${offset}"
+
     local result=$(zsh-histdb-query -separator $'\n' "$query")
     local lines=("${(f)result}")
     HISTDB_ISEARCH_DATE=${lines[-1]}
