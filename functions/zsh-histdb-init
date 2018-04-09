@@ -20,7 +20,7 @@ EOF
     if [[ -z ${HISTDB_SESSION} ]]; then
         HISTDB_HOST=$HOST
 
-        HISTDB_SESSION=$(zsh-histdb-query "select 1+max(session) from history inner join places on places.rowid=history.place_id where places.host = ${(qqq)HISTDB_HOST}")
+        HISTDB_SESSION=$(zsh-histdb-query "select 1+max(session) from history inner join places on places.rowid=history.place_id where places.host = ${(qqq)HISTDB_HOST}" | tail -n1)
         HISTDB_SESSION=($=HISTDB_SESSION)
         HISTDB_SESSION="$HISTDB_SESSION"
         : ${HISTDB_SESSION:=0}

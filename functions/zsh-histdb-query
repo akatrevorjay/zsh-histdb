@@ -2,6 +2,7 @@
 
 zsh-histdb-query () {
     sqlite3 \
+      -header \
       -column \
       ${HISTDB_FILE} \
       "$@"

@@ -209,9 +209,9 @@ order by start_time asc
     if [[ $debug = 1 ]]; then
         echo "$query"
     else
-        local count=$(zsh-histdb-query $count_query)
+        local count=$(zsh-histdb-query $count_query | tail -n1)
 
-        zsh-histdb-query -header -column $query
+        zsh-histdb-query $query
 
         [[ -n $limit ]] && [[ $limit -lt $count ]] && echo "(showing $limit of $count results)"
     fi

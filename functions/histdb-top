@@ -23,16 +23,16 @@ histdb-top () {
     esac
 
     zsh-histdb-query \
-      -header "select count(*) as count, places.host, $field as cmd
-              from history
-                left join commands
-                  on history.command_id=commands.rowid
-                left join places
-                  on history.place_id=places.rowid
-                group by
-                  places.host,
-                  $field
-                order by count(*)"
+      "select count(*) as count, places.host, $field as cmd
+        from history
+        left join commands
+            on history.command_id=commands.rowid
+        left join places
+            on history.place_id=places.rowid
+        group by
+            places.host,
+            $field
+        order by count(*)"
 }
 
 histdb-top "$@"
