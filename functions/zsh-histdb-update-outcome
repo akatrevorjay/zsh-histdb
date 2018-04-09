@@ -1,0 +1,15 @@
+#!/bin/zsh
+
+zsh-histdb-update-outcome () {
+    local retval=$?
+    local finished=$(date +%s)
+    if [[ $HISTDB_AWAITING_EXIT == 1 ]]; then
+        zsh-histdb-init
+        zsh-histdb-query "update history set exit_status = ${retval}, duration = ${finished} - start_time
+where rowid = (select max(rowid) from history) and session = ${HISTDB_SESSION}"
+        HISTDB_AWAITING_EXIT=0
+    fi
+}
+
+zsh-histdb-update-outcome "$@"
+

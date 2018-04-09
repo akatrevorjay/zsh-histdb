@@ -1,10 +1,25 @@
 #!/bin/zsh
 
-autoload -Uz add-zsh-hook
+(( ${+commands[sqlite3]} )) || return
 
-source ${0:h}/sqlite-history.zsh
+fpath+=(${0:h}/functions)
 
-add-zsh-hook precmd histdb-update-outcome
+: ${HISTDB_FILE:="${HOME}/.histdb/zsh-history.db"}
+# : ${HISTDB_INSTALLED_IN:=${(%):-%N}}
+: ${HISTDB_INSTALLED_IN:=${0:a:h}}
+typeset -ig HISTDB_AWAITING_EXIT=0
+typeset -g HISTDB_FILE HISTDB_INSTALLED_IN
+
+declare -a _BORING_COMMANDS
+_BORING_COMMANDS=($'^ls$' $'^cd$' $'^ ' $'^histdb' $'^top$' $'^htop$')
+
+autoload -Uz \
+    add-zsh-hook \
+    zsh-histdb-query zsh-histdb-init zsh-histdb-update-outcome \
+    histdb histdb-top histdb-sync histdb-merge
+
+zsh-histdb-init
+add-zsh-hook precmd zsh-histdb-update-outcome
 
 source ${0:h}/history-timer.zsh
 source ${0:h}/histdb-interactive.zsh

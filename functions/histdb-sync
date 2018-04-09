@@ -1,0 +1,31 @@
+#!/bin/zsh
+
+histdb-sync () {
+    zsh-histdb-init
+
+    local hist_dir=${HISTDB_FILE:h}
+    [[ -d $hist_dir ]] || return
+
+    (
+        cd -- $hist_dir || return 1
+
+        local g_is_inside_work_tree=$(git rev-parse --is-inside-work-tree)
+        local g_show_toplevel=$(git rev-parse --show-toplevel)
+
+        if [[ $g_is_inside_work_tree != 'true' ]] || [[ $g_show_toplevel != $PWD ]]; then
+            git init
+
+            git config merge.histdb.driver "${(qqq)HISTDB_INSTALLED_IN}/histdb-merge %O %A %B"
+
+            printf '%s merge=histdb\n' ${(qqq)HISTDB_FILE:t} >> ./.gitattributes
+            git add .gitattributes
+
+            git add ${HISTDB_FILE:t}
+        fi
+
+        git commit -am "history" && git pull --no-edit && git push
+    )
+}
+
+histdb-sync "$@"
+

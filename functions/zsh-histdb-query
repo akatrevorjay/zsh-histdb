@@ -1,0 +1,15 @@
+#!/bin/zsh
+
+zsh-histdb-query () {
+    sqlite3 \
+      -column \
+      ${HISTDB_FILE} \
+      "$@"
+
+    local rv=$?
+    [[ $rv -eq 0 ]] || echo "[$0] error in: $*" >&2
+    return $rv
+}
+
+zsh-histdb-query "$@"
+
