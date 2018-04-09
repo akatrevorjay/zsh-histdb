@@ -5,7 +5,7 @@ typeset -g HISTDB_FILE="${HOME}/.histdb/zsh-history.db"
 typeset -g HISTDB_SESSION=""
 typeset -g HISTDB_HOST=""
 # typeset -g HISTDB_INSTALLED_IN="${(%):-%N}"
-# typeset -g HISTDB_INSTALLED_IN=${0:A:h}
+typeset -g HISTDB_INSTALLED_IN=${0:a:h}
 typeset -g HISTDB_AWAITING_EXIT=0
 
 zsh-histdb-query () {
@@ -33,9 +33,9 @@ EOF
     fi
 
     if [[ -z ${HISTDB_SESSION} ]]; then
-        HISTDB_HOST=${(qqq)HOST}
+        HISTDB_HOST=$HOST
 
-        HISTDB_SESSION=$(zsh-histdb-query "select 1+max(session) from history inner join places on places.rowid=history.place_id where places.host = ${HISTDB_HOST}")
+        HISTDB_SESSION=$(zsh-histdb-query "select 1+max(session) from history inner join places on places.rowid=history.place_id where places.host = ${(qqq)HISTDB_HOST}")
         : ${HISTDB_SESSION:=0}
         readonly HISTDB_SESSION
     fi
@@ -71,7 +71,7 @@ zshaddhistory () {
 
     zsh-histdb-query \
       "insert into commands (argv) values (${(qqq)cmd});
-      insert into places   (host, dir) values (${HISTDB_HOST}, ${(qqq)pwd});
+    insert into places   (host, dir) values (${(qqq)HISTDB_HOST}, ${(qqq)pwd});
       insert into history
         (session, command_id, place_id, start_time)
       select
@@ -83,7 +83,7 @@ zshaddhistory () {
         commands, places
       where
         commands.argv = ${(qqq)cmd} and
-        places.host = ${HISTDB_HOST} and
+        places.host = ${(qqq)HISTDB_HOST} and
         places.dir = ${(qqq)pwd}
       ;"
 
@@ -157,11 +157,7 @@ histdb-sync () {
 
 histdb () {
     zsh-histdb-init
-    local -a opts
-    local -a hosts
-    local -a indirs
-    local -a atdirs
-    local -a sessions
+    local opts=() hosts=() indirs=() atdirs=() sessions=()
 
     zparseopts -E -D -a opts \
                -host+::=hosts \
@@ -190,8 +186,9 @@ histdb () {
     --limit n only show n rows. defaults to $LINES or 25"
 
     local selcols="session as ses, dir"
-    local cols="session, replace(places.dir, '$HOME', '~') as dir"
+    local cols="session, replace(places.dir, ${(qqq)HOME}, '~') as dir"
     local where="not (commands.argv like 'histdb%')"
+
     if [[ -p /dev/stdout ]]; then
         local limit=""
     else
@@ -204,15 +201,17 @@ histdb () {
     if (( ${#hosts} )); then
         local hostwhere=""
         local host=""
+
         for host ($hosts); do
             host="${${host#--host}#=}"
             hostwhere="${hostwhere}${host:+${hostwhere:+ or }places.host=${(qqq)host}}"
         done
+
         where="${where}${hostwhere:+ and (${hostwhere})}"
         cols="${cols}, places.host as host"
         selcols="${selcols}, host"
     else
-        where="${where} and places.host=${HISTDB_HOST}"
+      where="${where} and places.host=${(qqq)HISTDB_HOST}"
     fi
 
     if (( ${#indirs} + ${#atdirs} )); then
@@ -250,9 +249,10 @@ histdb () {
         case $opt in
             --from*)
                 local from=${opt#--from}
+
                 case $from in
                     -*)
-                        from="datetime('now', '$from')"
+                        from="datetime('now', ${(qqq)from})"
                         ;;
                     today)
                         from="datetime('now', 'start of day')"
@@ -261,13 +261,16 @@ histdb () {
                         from="datetime('now', 'start of day', '-1 day')"
                         ;;
                 esac
+
                 where="${where} and datetime(start_time, 'unixepoch') >= $from"
-            ;;
+                ;;
+
             --until*)
                 local until=${opt#--until}
+
                 case $until in
                     -*)
-                        until="datetime('now', '$until')"
+                        until="datetime('now', ${(qqq)until})"
                         ;;
                     today)
                         until="datetime('now', 'start of day')"
@@ -276,25 +279,32 @@ histdb () {
                         until="datetime('now', 'start of day', '-1 day')"
                         ;;
                 esac
+
                 where="${where} and datetime(start_time, 'unixepoch') <= $until"
                 ;;
+
             -d)
                 debug=1
                 ;;
+
             --detail)
                 cols="${cols}, exit_status, duration "
                 selcols="${selcols}, exit_status as [?],duration as secs "
                 ;;
+
             -h|--help)
-                echo "$usage"
+                echo "$usage" >&2
                 return 0
                 ;;
+
             --forget)
                 forget=1
                 ;;
+
             --exact)
                 exact=1
                 ;;
+
             --limit*)
                 limit=${opt#--limit}
                 ;;
@@ -344,20 +354,7 @@ order by max_start desc) order by max_start asc"
     if [[ $debug = 1 ]]; then
         echo "$query"
     else
-        local count=$(zsh-histdb-query "$count_query")
-        if [[ -p /dev/stdout ]]; then
-            buffer() {
-                ## this runs out of memory for big files I think perl -e 'local $/; my $stdin = <STDIN>; print $stdin;'
-                temp=$(mktemp)
-                cat >! "$temp"
-                cat -- "$temp"
-                rm -f -- "$temp"
-            }
-        else
-            buffer() {
-                cat
-            }
-        fi
+        local count=$(zsh-histdb-query $count_query)
 
         zsh-histdb-query -header -column $query
 
@@ -378,3 +375,4 @@ where ${where})"
         fi
     fi
 }
+
