@@ -1,4 +1,4 @@
-which sqlite3 >/dev/null 2>&1 || return;
+(( ${+commands[sqlite3]} )) || return
 
 typeset -g HISTDB_QUERY=""
 typeset -g HISTDB_FILE="${HOME}/.histdb/zsh-history.db"
@@ -7,22 +7,22 @@ typeset -g HISTDB_HOST=""
 typeset -g HISTDB_INSTALLED_IN="${(%):-%N}"
 typeset -g HISTDB_AWAITING_EXIT=0
 
-sql_escape () {
+zsh-histdb-sql-escape () {
     sed -e "s/'/''/g" <<< "$@"
 }
 
-_histdb_query () {
+zsh-histdb-query () {
     sqlite3 "${HISTDB_FILE}" "$@"
     [[ "$?" -ne 0 ]] && echo "error in $@"
 }
 
-_histdb_init () {
+zsh-histdb-init () {
     if ! [[ -e "${HISTDB_FILE}" ]]; then
         local hist_dir="$(dirname ${HISTDB_FILE})"
         if ! [[ -d "$hist_dir" ]]; then
             mkdir -p -- "$hist_dir"
         fi
-        _histdb_query <<-EOF
+        zsh-histdb-query <<-EOF
 create table commands (argv text, unique(argv) on conflict ignore);
 create table places   (host text, dir text, unique(host, dir) on conflict ignore);
 create table history  (session int,
@@ -33,9 +33,10 @@ create table history  (session int,
                        duration int);
 EOF
     fi
-    if [[ -z "${HISTDB_SESSION}" ]]; then
-        HISTDB_HOST="'$(sql_escape ${HOST})'"
-        HISTDB_SESSION=$(_histdb_query "select 1+max(session) from history inner join places on places.rowid=history.place_id where places.host = ${HISTDB_HOST}")
+
+    if [[ -z ${HISTDB_SESSION} ]]; then
+        HISTDB_HOST="'$(zsh-histdb-sql-escape ${HOST})'"
+        HISTDB_SESSION=$(zsh-histdb-query "select 1+max(session) from history inner join places on places.rowid=history.place_id where places.host = ${HISTDB_HOST}")
         HISTDB_SESSION="${HISTDB_SESSION:-0}"
         readonly HISTDB_SESSION
     fi
@@ -48,8 +49,8 @@ histdb-update-outcome () {
     local retval=$?
     local finished=$(date +%s)
     if [[ $HISTDB_AWAITING_EXIT == 1 ]]; then
-        _histdb_init
-        _histdb_query "update history set exit_status = ${retval}, duration = ${finished} - start_time
+        zsh-histdb-init
+        zsh-histdb-query "update history set exit_status = ${retval}, duration = ${finished} - start_time
 where rowid = (select max(rowid) from history) and session = ${HISTDB_SESSION}"
         HISTDB_AWAITING_EXIT=0
     fi
@@ -64,13 +65,13 @@ zshaddhistory () {
         fi
     done
 
-    local cmd="'$(sql_escape $cmd)'"
-    local pwd="'$(sql_escape ${PWD})'"
+    local cmd="'$(zsh-histdb-sql-escape $cmd)'"
+    local pwd="'$(zsh-histdb-sql-escape ${PWD})'"
     local started=$(date +%s)
-    _histdb_init
+    zsh-histdb-init
 
     if [[ "$cmd" != "''" ]]; then
-        _histdb_query \
+        zsh-histdb-query \
 "insert into commands (argv) values (${cmd});
 insert into places   (host, dir) values (${HISTDB_HOST}, ${pwd});
 insert into history
@@ -93,7 +94,7 @@ where
 }
 
 histdb-top () {
-    _histdb_init
+    zsh-histdb-init
     local sep=$'\x1f'
     local field
     local join
@@ -111,7 +112,7 @@ histdb-top () {
             table=commands
             ;;;
     esac
-    _histdb_query -separator "$sep" \
+    zsh-histdb-query -separator "$sep" \
             -header \
             "select count(*) as count, places.host, replace($field, '
 ', '
@@ -120,7 +121,7 @@ $sep$sep') as ${1:-cmd} from history left join commands on history.command_id=co
 }
 
 histdb-sync () {
-    _histdb_init
+    zsh-histdb-init
     local hist_dir="$(dirname ${HISTDB_FILE})"
     if [[ -d "$hist_dir" ]]; then
         pushd "$hist_dir"
@@ -137,7 +138,7 @@ histdb-sync () {
 }
 
 histdb () {
-    _histdb_init
+    zsh-histdb-init
     local -a opts
     local -a hosts
     local -a indirs
@@ -189,7 +190,7 @@ histdb () {
         local host=""
         for host ($hosts); do
             host="${${host#--host}#=}"
-            hostwhere="${hostwhere}${host:+${hostwhere:+ or }places.host='$(sql_escape ${host})'}"
+            hostwhere="${hostwhere}${host:+${hostwhere:+ or }places.host='$(zsh-histdb-sql-escape ${host})'}"
         done
         where="${where}${hostwhere:+ and (${hostwhere})}"
         cols="${cols}, places.host as host"
@@ -203,11 +204,11 @@ histdb () {
         local dir=""
         for dir ($indirs); do
             dir="${${${dir#--in}#=}:-$PWD}"
-            dirwhere="${dirwhere}${dirwhere:+ or }places.dir like '$(sql_escape $dir)%'"
+            dirwhere="${dirwhere}${dirwhere:+ or }places.dir like '$(zsh-histdb-sql-escape $dir)%'"
         done
         for dir ($atdirs); do
             dir="${${${dir#--at}#=}:-$PWD}"
-            dirwhere="${dirwhere}${dirwhere:+ or }places.dir = '$(sql_escape $dir)'"
+            dirwhere="${dirwhere}${dirwhere:+ or }places.dir = '$(zsh-histdb-sql-escape $dir)'"
         done
         where="${where}${dirwhere:+ and (${dirwhere})}"
     fi
@@ -285,9 +286,9 @@ histdb () {
 
     if [[ -n "$*" ]]; then
         if [[ $exact -eq 0 ]]; then
-            where="${where} and commands.argv glob '*$(sql_escape $@)*'"
+            where="${where} and commands.argv glob '*$(zsh-histdb-sql-escape $@)*'"
         else
-            where="${where} and commands.argv = '$(sql_escape $@)'"
+            where="${where} and commands.argv = '$(zsh-histdb-sql-escape $@)'"
         fi
     fi
 
@@ -328,7 +329,7 @@ order by max_start desc) order by max_start asc"
     if [[ $debug = 1 ]]; then
         echo "$query"
     else
-        local count=$(_histdb_query "$count_query")
+        local count=$(zsh-histdb-query "$count_query")
         if [[ -p /dev/stdout ]]; then
             buffer() {
                 ## this runs out of memory for big files I think perl -e 'local $/; my $stdin = <STDIN>; print $stdin;'
@@ -343,9 +344,9 @@ order by max_start desc) order by max_start asc"
             }
         fi
         if [[ $sep == $'\x1f' ]]; then
-            _histdb_query -header -separator $sep "$query" | iconv -f utf-8 -t utf-8 -c | column -t -s $sep | buffer
+            zsh-histdb-query -header -separator $sep "$query" | iconv -f utf-8 -t utf-8 -c | column -t -s $sep | buffer
         else
-            _histdb_query -header -separator $sep "$query" | buffer
+            zsh-histdb-query -header -separator $sep "$query" | buffer
         fi
         [[ -n $limit ]] && [[ $limit -lt $count ]] && echo "(showing $limit of $count results)"
     fi
@@ -353,14 +354,14 @@ order by max_start desc) order by max_start asc"
     if [[ $forget -gt 0 ]]; then
         read -q "REPLY?Forget all these results? [y/n] "
         if [[ $REPLY =~ "[yY]" ]]; then
-            _histdb_query "delete from history where
+            zsh-histdb-query "delete from history where
 history.rowid in (
 select history.rowid from
 history
   left join commands on history.command_id = commands.rowid
   left join places on history.place_id = places.rowid
 where ${where})"
-            _histdb_query "delete from commands where commands.rowid not in (select distinct history.command_id from history)"
+            zsh-histdb-query "delete from commands where commands.rowid not in (select distinct history.command_id from history)"
         fi
     fi
 }

@@ -16,7 +16,7 @@ typeset -g HISTDB_ISEARCH_LAST_N=""
 # make a keymap for histdb isearch
 bindkey -N histdb-isearch main
 
-_histdb_isearch_query () {
+zsh-histdb-isearch_query () {
     if [[ -z $BUFFER ]]; then
        HISTDB_ISEARCH_MATCH=""
        return
@@ -71,7 +71,7 @@ group by commands.argv, places.dir, places.host
 order by ${maxmin}(history.start_time) ${ascdesc}
 limit 1
 offset ${offset}"
-    local result=$(_histdb_query -separator $'\n' "$query")
+    local result=$(zsh-histdb-query -separator $'\n' "$query")
     local lines=("${(f)result}")
     HISTDB_ISEARCH_DATE=${lines[-1]}
     HISTDB_ISEARCH_HOST=${lines[-2]}
@@ -82,7 +82,7 @@ offset ${offset}"
     HISTDB_ISEARCH_MATCH=${(F)lines}
 }
 
-_histdb_isearch_display () {
+zsh-histdb-isearch_display () {
     if [[ $HISTDB_ISEARCH_THIS_HOST == 1 ]]; then
         local host_bit=" h"
     else
@@ -121,31 +121,31 @@ $top_bit"
     fi
 }
 
-_histdb-isearch-up () {
+zsh-histdb-isearch-up () {
     HISTDB_ISEARCH_N=$(( $HISTDB_ISEARCH_N + 1 ))
 }
 
-_histdb-isearch-down () {
+zsh-histdb-isearch-down () {
     HISTDB_ISEARCH_N=$(( $HISTDB_ISEARCH_N - 1 ))
 }
 
-zle -N self-insert-histdb-isearch
+zle -N self-insertzsh-histdb-isearch
 
-_histdb_line_redraw () {
-    _histdb_isearch_query
-    _histdb_isearch_display
+zsh-histdb-line_redraw () {
+    zsh-histdb-isearch_query
+    zsh-histdb-isearch_display
 }
 
-_histdb-isearch () {
+zsh-histdb-isearch () {
     local old_buffer=${BUFFER}
     local old_cursor=${CURSOR}
     HISTDB_ISEARCH_N=0
     echo -ne "\e[4 q" # switch to underline cursor
 
     zle -K histdb-isearch
-    zle -N zle-line-pre-redraw _histdb_line_redraw
-    _histdb_isearch_query
-    _histdb_isearch_display
+    zle -N zle-line-pre-redraw zsh-histdb-line_redraw
+    zsh-histdb-isearch_query
+    zsh-histdb-isearch_display
     zle recursive-edit; local stat=$?
     zle -D zle-line-pre-redraw # TODO push/pop zle-line-pre-redraw and
                                # self-insert, rather than nuking
@@ -169,14 +169,14 @@ _histdb-isearch () {
 
 # this will work outside histdb-isearch if you want
 # so you can recover from history and then cd afterwards
-_histdb-isearch-cd () {
+zsh-histdb-isearch-cd () {
     if [[ -d ${HISTDB_ISEARCH_DIR} ]]; then
         cd "${HISTDB_ISEARCH_DIR}"
         zle reset-prompt
     fi
 }
 
-_histdb-isearch-toggle-host () {
+zsh-histdb-isearch-toggle-host () {
     if [[ $HISTDB_ISEARCH_THIS_HOST == 1 ]]; then
         HISTDB_ISEARCH_THIS_HOST=0
     else
@@ -184,7 +184,7 @@ _histdb-isearch-toggle-host () {
     fi
 }
 
-_histdb-isearch-toggle-dir () {
+zsh-histdb-isearch-toggle-dir () {
     if [[ $HISTDB_ISEARCH_THIS_DIR == 1 ]]; then
         HISTDB_ISEARCH_THIS_DIR=0
     else
@@ -192,23 +192,23 @@ _histdb-isearch-toggle-dir () {
     fi
 }
 
-zle -N _histdb-isearch-up
-zle -N _histdb-isearch-down
-zle -N _histdb-isearch
-zle -N _histdb-isearch-cd
-zle -N _histdb-isearch-toggle-dir
-zle -N _histdb-isearch-toggle-host
+zle -N zsh-histdb-isearch-up
+zle -N zsh-histdb-isearch-down
+zle -N zsh-histdb-isearch
+zle -N zsh-histdb-isearch-cd
+zle -N zsh-histdb-isearch-toggle-dir
+zle -N zsh-histdb-isearch-toggle-host
 
-bindkey -M histdb-isearch '' _histdb-isearch-up
-bindkey -M histdb-isearch '^[[A' _histdb-isearch-up
+bindkey -M histdb-isearch '' zsh-histdb-isearch-up
+bindkey -M histdb-isearch '^[[A' zsh-histdb-isearch-up
 
-bindkey -M histdb-isearch '' _histdb-isearch-down
-bindkey -M histdb-isearch '^[[B' _histdb-isearch-down
+bindkey -M histdb-isearch '' zsh-histdb-isearch-down
+bindkey -M histdb-isearch '^[[B' zsh-histdb-isearch-down
 
-bindkey -M histdb-isearch '^[j' _histdb-isearch-cd
+bindkey -M histdb-isearch '^[j' zsh-histdb-isearch-cd
 
-bindkey -M histdb-isearch '^[h' _histdb-isearch-toggle-host
-bindkey -M histdb-isearch '^[d' _histdb-isearch-toggle-dir
+bindkey -M histdb-isearch '^[h' zsh-histdb-isearch-toggle-host
+bindkey -M histdb-isearch '^[d' zsh-histdb-isearch-toggle-dir
 
 # because we are using BUFFER for output, we have to reimplement
 # pretty much the whole set of buffer editing operations
