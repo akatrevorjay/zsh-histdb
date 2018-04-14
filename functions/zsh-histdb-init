@@ -25,6 +25,9 @@ EOF
         HISTDB_SESSION="$HISTDB_SESSION"
         : ${HISTDB_SESSION:=0}
         readonly -i HISTDB_SESSION
+
+        autoload -Uz add-zsh-hook
+        add-zsh-hook precmd zsh-histdb-update-outcome
     fi
 }
 

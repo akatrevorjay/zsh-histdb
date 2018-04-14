@@ -14,13 +14,9 @@ declare -a _BORING_COMMANDS
 _BORING_COMMANDS=($'^ls$' $'^cd$' $'^ ' $'^histdb' $'^top$' $'^htop$')
 
 autoload -Uz \
-    add-zsh-hook \
     zsh-histdb-query zsh-histdb-init zsh-histdb-update-outcome \
     histdb histdb-top histdb-sync histdb-merge
 
-zsh-histdb-init
-add-zsh-hook precmd zsh-histdb-update-outcome
-
-source ${0:h}/history-timer.zsh
-source ${0:h}/histdb-interactive.zsh
+# source ${0:h}/history-timer.zsh
+# source ${0:h}/histdb-interactive.zsh
 
