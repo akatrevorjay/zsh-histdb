@@ -13,8 +13,9 @@ autoload -Uz \
     histdb histdb-top histdb-sync histdb-merge
 
 
-# zsh-histdb-init
-#
-# source ${0:h}/history-timer.zsh
-# source ${0:h}/histdb-interactive.zsh
+zsh-histdb-init
+
+
+source ${0:h}/history-timer.zsh
+source ${0:h}/histdb-interactive.zsh
 
