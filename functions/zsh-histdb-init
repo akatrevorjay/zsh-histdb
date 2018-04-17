@@ -1,5 +1,16 @@
 #!/bin/zsh
 
+zmodload zsh/pcre
+autoload -Uz add-zsh-hook
+
+
+typeset -ig HISTDB_AWAITING_EXIT=0
+typeset -g HISTDB_FILE HISTDB_INSTALLED_IN
+
+typeset -a HISTDB_BORING_COMMANDS
+[[ $#HISTDB_BORING_COMMANDS -gt 0 ]] || HISTDB_BORING_COMMANDS=($'^ls$' $'^cd$' $'^ ' $'^histdb' $'^top$' $'^htop$')
+
+
 zsh-histdb-init () {
     if ! [[ -e ${HISTDB_FILE} ]]; then
         local hist_dir=${HISTDB_FILE:h}
@@ -26,17 +37,18 @@ EOF
         : ${HISTDB_SESSION:=0}
         readonly -i HISTDB_SESSION
 
-        autoload -Uz add-zsh-hook
         add-zsh-hook precmd zsh-histdb-update-outcome
     fi
 }
+
+
 
 zsh-histdb-zshaddhistory () {
     local cmd="${1[0, -2]}"
     [[ -n $cmd ]] || return 0
 
     local boring
-    for boring in ${(@)_BORING_COMMANDS}; do
+    for boring in ${(@)HISTDB_BORING_COMMANDS}; do
         if [[ $cmd =~ $boring ]]; then
             return 0
         fi
@@ -70,9 +82,11 @@ zsh-histdb-zshaddhistory () {
     return 0
 }
 
-zshaddhistory() {
-    zsh-histdb-zshaddhistory "$@"
-}
+
+# zshaddhistory() {
+#     zsh-histdb-zshaddhistory "$@"
+# }
+
 
 zsh-histdb-init "$@"
 
