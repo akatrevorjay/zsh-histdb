@@ -1,3 +1,5 @@
+#!/bin/zsh
+
 typeset -g HISTDB_ISEARCH_N
 typeset -g HISTDB_ISEARCH_MATCH
 typeset -g HISTDB_ISEARCH_DIR

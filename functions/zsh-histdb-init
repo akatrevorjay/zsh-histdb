@@ -12,6 +12,26 @@ typeset -ig HISTDB_AWAITING_EXIT=0
 typeset -g HISTDB_FILE HISTDB_INSTALLED_IN
 
 
+zsh-histdb-query() {
+    local cmd=(
+        sqlite3
+        -header
+        -column
+
+        ${HISTDB_FILE:?}
+
+        "$@"
+    )
+
+    local rv=0; $cmd || rv=$?
+
+    [[ $rv -eq 0 ]] || \
+        printf '\n\n[%s] error (rv=%d) executing query: %s\n\n' $0 $rv "$cmd" >&2
+
+    return $rv
+}
+
+
 zsh-histdb-createdb() {
     [[ ! -e ${HISTDB_FILE:?} ]]
 
@@ -20,7 +40,6 @@ zsh-histdb-createdb() {
 
     zsh-histdb-query <<-'EOF'
         begin transaction;
-
         create table commands (argv text, unique(argv) on conflict ignore);
         create table places   (host text, dir text, unique(host, dir) on conflict ignore);
         create table history  (
@@ -31,7 +50,6 @@ zsh-histdb-createdb() {
             start_time int,
             duration int
         );
-
         commit;
     EOF
 }
@@ -40,18 +58,17 @@ zsh-histdb-createdb() {
 zsh-histdb-init () {
     [[ -e ${HISTDB_FILE:?} ]] || zsh-histdb-createdb
 
-    if [[ -z ${HISTDB_SESSION} ]]; then
+    if [[ -z $HISTDB_SESSION ]]; then
         HISTDB_HOST=$HOST
 
-        HISTDB_SESSION=$(
-            zsh-histdb-query \
-            "select 1+max(session) from history inner" \
-            "join places on places.rowid=history.place_id" \
-            "where places.host = ${(qqq)HISTDB_HOST}" \
-            | tail -n1 )
+        local q=(
+            "select 1+max(session) from history inner"
+            "join places on places.rowid=history.place_id"
+            "where places.host = ${(qqq)HISTDB_HOST}"
+        )
 
-        HISTDB_SESSION=($=HISTDB_SESSION)
-        HISTDB_SESSION="$HISTDB_SESSION"
+        local sessid=$(zsh-histdb-query "$q"| tail -n1)
+        HISTDB_SESSION=${sessid// }
 
         : ${HISTDB_SESSION:=0}
         readonly -i HISTDB_SESSION
@@ -103,5 +120,23 @@ zsh-histdb-insert () {
 }
 
 
-# zsh-histdb-init "$@"
+zsh-histdb-update-outcome () {
+    local retval=$?
+    local finished=$(date +%s)
+
+    [[ $HISTDB_AWAITING_EXIT -eq 1 ]] || return 0
+
+    HISTDB_AWAITING_EXIT=0
+
+    zsh-histdb-query <<-EOF
+        update history set
+            exit_status = $retval,
+            duration = $finished - start_time
+            where rowid = (select max(rowid) from history)
+                and session = ${HISTDB_SESSION}
+    EOF
+}
+
+
+zsh-histdb-init "$@"
 

@@ -9,13 +9,11 @@ fpath+=(${0:h}/functions)
 : ${HISTDB_INSTALLED_IN:=${0:a:h}}
 
 autoload -Uz \
-    zsh-histdb-query zsh-histdb-init zsh-histdb-update-outcome \
+    zsh-histdb-init \
     histdb histdb-top histdb-sync histdb-merge
 
 
 zsh-histdb-init
 
-
-source ${0:h}/history-timer.zsh
-source ${0:h}/histdb-interactive.zsh
+# source ${0:h}/histdb-interactive.zsh
 
