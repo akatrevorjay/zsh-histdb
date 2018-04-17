@@ -1,140 +1,112 @@
 #!/bin/zsh
 
-zmodload zsh/regex
-autoload -Uz add-zsh-hook
-
-
-typeset -a HISTDB_BORING_COMMANDS
-[[ $#HISTDB_BORING_COMMANDS -gt 0 ]] \
-    || HISTDB_BORING_COMMANDS=($'^ls$' $'^cd$' $'^ ' $'^histdb' $'^top$' $'^htop$')
-
-typeset -ig HISTDB_AWAITING_EXIT=0
-typeset -g HISTDB_FILE HISTDB_INSTALLED_IN
+[[ -n $HISTDB_BORING_COMMANDS ]] \
+	|| HISTDB_BORING_COMMANDS=($'^ls$' $'^cd$' $'^ ' $'^histdb' $'^top$' $'^htop$')
 
 
 zsh-histdb-query() {
-    local cmd=(
-        sqlite3
-        -header
-        -column
+	local cmd=(
+		sqlite3
+		-header
+		-column
 
-        ${HISTDB_FILE:?}
+		${HISTDB_FILE:?}
 
-        "$@"
-    )
+		"$@"
+	)
 
-    local rv=0; $cmd || rv=$?
+	local rv=0; $cmd || rv=$?
 
-    [[ $rv -eq 0 ]] || \
-        printf '\n\n[%s] error (rv=%d) executing query: %s\n\n' $0 $rv "$cmd" >&2
+	[[ $rv -eq 0 ]] \
+		|| printf '\n\n[%s] error (rv=%d) executing query: %s\n\n' $0 $rv "$cmd" >&2
 
-    return $rv
+	return $rv
 }
 
 
 zsh-histdb-createdb() {
-    [[ ! -e ${HISTDB_FILE:?} ]]
+	[[ ! -e ${HISTDB_FILE:?} ]]
 
-    local hist_dir=${HISTDB_FILE:h}
-    mkdir -pv -- $hist_dir
+	local hist_dir=${HISTDB_FILE:h}
+	mkdir -pv -- $hist_dir
 
-    zsh-histdb-query <<-'EOF'
-        begin transaction;
-        create table commands (argv text, unique(argv) on conflict ignore);
-        create table places   (host text, dir text, unique(host, dir) on conflict ignore);
-        create table history  (
-            session int,
-            command_id int references commands (rowid),
-            place_id int references places (rowid),
-            exit_status int,
-            start_time int,
-            duration int
-        );
-        commit;
-    EOF
+	zsh-histdb-query <<-'EOF'
+		begin transaction;
+		create table commands (argv text, unique(argv) on conflict ignore);
+		create table places   (host text, dir text, unique(host, dir) on conflict ignore);
+		create table history  (
+			session int,
+			command_id int references commands (rowid),
+			place_id int references places (rowid),
+			exit_status int,
+			start_time int,
+			duration int
+		);
+		commit;
+	EOF
 }
 
 
 zsh-histdb-init () {
-    [[ -e ${HISTDB_FILE:?} ]] || zsh-histdb-createdb
+	[[ -e ${HISTDB_FILE:?} ]] || zsh-histdb-createdb
+	[[ -z $__histdb_sessid ]]  || return 0
 
-    if [[ -z $HISTDB_SESSION ]]; then
-        HISTDB_HOST=$HOST
+	HISTDB_HOST=$HOST
 
-        local q=(
-            "select 1+max(session) from history inner"
-            "join places on places.rowid=history.place_id"
-            "where places.host = ${(qqq)HISTDB_HOST}"
-        )
+	local q="select 1+max(h.session) from history as h inner join places as p on p.rowid = h.place_id where p.host = ${(qqq)HISTDB_HOST} ;"
 
-        local sessid=$(zsh-histdb-query "$q"| tail -n1)
-        HISTDB_SESSION=${sessid// }
+	local raw=($(zsh-histdb-query $q))
+	typeset -i -g __histdb_sessid=${raw[-1]}
 
-        : ${HISTDB_SESSION:=0}
-        readonly -i HISTDB_SESSION
+	typeset -i -g __histdb_retvals_planned=0
 
-        add-zsh-hook zshaddhistory  zsh-histdb-insert
-        add-zsh-hook precmd         zsh-histdb-update-outcome
-    fi
+	autoload -Uz add-zsh-hook
+	add-zsh-hook zshaddhistory zsh-histdb-insert
+	add-zsh-hook precmd zsh-histdb-update-retval
 }
 
 
 zsh-histdb-insert () {
-    local cmd="${1[0, -2]}"
-    [[ -n $cmd ]] || return 0
+	local cmd="${1[0, -2]}"
+	[[ -n $cmd ]] || return 0
 
-    local boring
-    for boring in ${(@)HISTDB_BORING_COMMANDS}; do
-        if [[ $cmd =~ $boring ]]; then
-            return 0
-        fi
-    done
+	local boring
+	for boring in ${(@)HISTDB_BORING_COMMANDS}; do
+		if [[ $cmd =~ $boring ]]; then
+			return 0
+		fi
+	done
 
-    local started=$(date +%s)
+	local -i started=$(date +%s)
 
-    zsh-histdb-query <<-EOF
-        begin transaction;
+	zsh-histdb-query <<-EOF
+		begin transaction;
+		insert into commands (argv) values (${(qqq)cmd});
+		insert into places   (host, dir) values (${(qqq)HISTDB_HOST}, ${(qqq)PWD});
+		insert into history  (session, command_id, place_id, start_time)
+		  select ${(q)__histdb_sessid}, c.rowid, p.rowid, ${(qqq)started}
+		  from commands as c, places as p
+		  where c.argv = ${(qqq)cmd} and p.host = ${(qqq)HISTDB_HOST} and p.dir = ${(qqq)PWD} ;
+		commit;
+	EOF
 
-        insert into commands (argv) values (${(qqq)cmd});
-        insert into places   (host, dir) values (${(qqq)HISTDB_HOST}, ${(qqq)PWD});
-        insert into history
-            (session, command_id, place_id, start_time)
-            select
-                ${HISTDB_SESSION},
-                commands.rowid,
-                places.rowid,
-                ${started}
-              from
-                commands, places
-              where
-                commands.argv = ${(qqq)cmd} and
-                places.host = ${(qqq)HISTDB_HOST} and
-                places.dir = ${(qqq)PWD}
-              ;
+	let '__histdb_retvals_planned ++'
 
-        commit;
-    EOF
-
-    HISTDB_AWAITING_EXIT=1
-    return 0
+	return 0
 }
 
 
-zsh-histdb-update-outcome () {
-    local retval=$?
-    local finished=$(date +%s)
+zsh-histdb-update-retval () {
+	[[ $__histdb_retvals_planned -gt 0 ]] || return
+	let '__histdb_retvals_planned --'
 
-    [[ $HISTDB_AWAITING_EXIT -eq 1 ]] || return 0
+	local -i rv=$?
+	local -i finished=$(date +%s)
 
-    HISTDB_AWAITING_EXIT=0
+    local q="update history set exit_status = ${(q)rv}, duration = ${(q)finished} - start_time "
+    q+="where rowid = (select max(rowid) from history) and session = ${(q)__histdb_sessid:?}"
 
-    zsh-histdb-query <<-EOF
-        update history set
-            exit_status = $retval,
-            duration = $finished - start_time
-            where rowid = (select max(rowid) from history)
-                and session = ${HISTDB_SESSION}
-    EOF
+	zsh-histdb-query $q
 }
 
 
