@@ -30,8 +30,14 @@ histdb () {
     --until x only show commands before date x (sqlite date parser)
     --limit n only show n rows. defaults to $LINES or 25"
 
-    local sescol="replace(session, $HISTDB_SESSION, 'cur/$HISTDB_SESSION') as ses"
+    local sescol='session'
+    if [[ -n $__histdb_sessid ]]; then
+      local cursesstext="cur/${__histdb_sessid:?}"
+      sescol="replace(session, ${(q)__histdb_sessid}, ${(qqq)cursesstext}) as ses"
+    fi
+
     local selcols="$sescol, dir"
+
     local cols="session, replace(places.dir, ${(qqq)HOME}, '~') as dir"
     local where="not (commands.argv like 'histdb%')"
 
@@ -83,7 +89,7 @@ histdb () {
         local sin=""
         local ses=""
         for ses ($sessions); do
-            ses="${${${ses#-s}#=}:-${HISTDB_SESSION}}"
+            ses="${${${ses#-s}#=}:-${__histdb_sessid}}"
             sin="${sin}${sin:+, }$ses"
         done
         where="${where}${sin:+ and session in ($sin)}"
